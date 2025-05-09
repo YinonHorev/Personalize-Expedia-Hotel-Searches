@@ -1,0 +1,60 @@
+[project]
+name = "personalize-expedia-hotel-searches"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.2.5",
+    "torch>=1.7.0",
+    "ruff>=0.3.0",
+    "pandas>=1.2.3",
+    "jupyterlab>=4.4.2",
+    "ydata-profiling>=4.16.1",
+    "ipywidgets>=8.1.7",
+]
+
+[tool.ruff]
+# Enable auto-fixes
+fix = true
+# Use same line length as Black
+line-length = 88
+# Assume Python 3.13
+target-version = "py313"
+# Files to exclude
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable rules
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "N",  # pep8-naming
+    "D",  # pydocstyle
+]
+# Ignore specific rules
+ignore = [
+    "D100",  # Missing docstring in public module
+    "D104",  # Missing docstring in public package
+    "D203",  # one-blank-line-before-class 
+    "D213",  # multi-line-summary-second-line
+]
+# Required for type checking with pyright
+extend-select = ["PYI"]
+
+[tool.ruff.format]
+# Sort imports
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

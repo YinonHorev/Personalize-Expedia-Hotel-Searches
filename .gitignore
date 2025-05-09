@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+.vscode/
+**/.DS_Store
+data/raw/test_set_VU_DM.csv
+data/raw/training_set_VU_DM.csv
+data/raw/submission_sample.csv
 # C extensions
 *.so
 
