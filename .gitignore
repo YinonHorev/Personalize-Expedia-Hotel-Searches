@@ -5,9 +5,9 @@ __pycache__/
 
 .vscode/
 **/.DS_Store
-data/raw/test_set_VU_DM.csv
-data/raw/training_set_VU_DM.csv
-data/raw/submission_sample.csv
+**/test_set_VU_DM.csv
+**/training_set_VU_DM.csv
+**/submission_sample.csv
 # C extensions
 *.so
 
