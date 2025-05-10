@@ -1,0 +1,55 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## Expedia Hotel Recommendation Dataset
+This dataset is designed for predicting which hotel a user is most likely to book based on their search query and hotel properties. Each entry in the dataset represents a unique combination of a user's search and a hotel property displayed in the search results. [cite: 17] Entries belonging to the same user search are linked by a common search ID.
+
+### Data Columns
+
+The dataset includes the following fields:
+
+| Field                        | Data Type | Description                                                                                                                                                                       |
+| :--------------------------- | :-------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `srch_id`                    | Integer   | The ID of the search.                                                                                                                                                             |
+| `date_time`                  | Date/time | Date and time of the search.                                                                                                                                                      |
+| `site_id`                    | Integer   | ID of the Expedia point of sale (e.g., Expedia.com, Expedia.co.uk).                                                                                                             |
+| `visitor_location_country_id` | Integer   | The ID of the country where the customer is located.                                                                                                                               |
+| `visitor_hist_starrating`    | Float     | The mean star rating of hotels the customer has previously purchased; null indicates no purchase history.                                                                     |
+| `visitor_hist_adr_usd`       | Float     | The mean price per night (in USD) of hotels the customer has previously purchased; null indicates no purchase history.                                                            |
+| `prop_country_id`            | Integer   | The ID of the country where the hotel is located.                                                                                                                                 |
+| `prop_id`                    | Integer   | The ID of the hotel.                                                                                                                                                              |
+| `prop_starrating`            | Integer   | The star rating of the hotel (1-5); 0 indicates no stars, unknown, or unpublicized rating.                                                                                      |
+| `prop_review_score`          | Float     | The mean customer review score for the hotel (out of 5, rounded to 0.5 increments); 0 means no reviews, null if unavailable.                                                      |
+| `prop_brand_bool`            | Integer   | +1 if the hotel is part of a major hotel chain; 0 if independent.                                                                                                                   |
+| `prop_location_score1`       | Float     | A score indicating the desirability of the hotel's location.                                                                                                                     |
+| `prop_location_score2`       | Float     | A second score indicating the desirability of the hotel's location.                                                                                                              |
+| `prop_log_historical_price`  | Float     | The logarithm of the mean price of the hotel over the last trading period; 0 if not sold in that period.                                                                          |
+| `price_usd`                  | Float     | Displayed price of the hotel for the given search. This may be per night or for the whole stay and may vary by country regarding taxes and fees.                                  |
+| `promotion_flag`             | Integer   | +1 if the hotel had a sale price promotion displayed.                                                                                                                             |
+| `srch_destination_id`        | Integer   | ID of the destination where the hotel search was performed.                                                                                                                        |
+| `srch_length_of_stay`        | Integer   | Number of nights for the searched stay.                                                                                                                                             |
+| `srch_booking_window`        | Integer   | Number of days in the future the hotel stay started from the search date.                                                                                                           |
+| `srch_adults_count`          | Integer   | The number of adults specified for the hotel room.                                                                                                                                |
+| `srch_children_count`        | Integer   | The number of children specified for the hotel room.                                                                                                                              |
+| `srch_room_count`            | Integer   | Number of hotel rooms specified in the search.                                                                                                                                    |
+| `srch_saturday_night_bool`   | Boolean   | +1 if the stay includes a Saturday night (for stays starting Thursday with length <= 4 nights); otherwise 0.                                                                       |
+| `srch_query_affinity_score`  | Float     | The log of the probability a hotel will be clicked on in internet searches (values are negative); null if no data.                                                                |
+| `orig_destination_distance`  | Float     | Physical distance between the hotel and the customer at the time of search; null if uncalculable.                                                                                 |
+| `random_bool`                | Boolean   | +1 if the displayed sort was random; 0 for normal sort order.                                                                                                                      |
+| `comp1_rate`                 | Integer   | +1 if Expedia has a lower price than competitor 1; 0 if same; -1 if Expedia's price is higher; null if no competitive data.                                                        |
+| `comp1_inv`                  | Integer   | +1 if competitor 1 does not have availability; 0 if both Expedia and competitor 1 have availability; null if no competitive data.                                                  |
+| `comp1_rate_percent_diff`    | Float     | Absolute percentage difference between Expedia and competitor 1's price (Expedia's price as denominator); null if no competitive data.                                          |
+| `comp2_rate`                 |           | (Same as comp1_rate, for competitor 2)                                                                                                                                            |
+| `comp2_inv`                  |           | (Same as comp1_inv, for competitor 2)                                                                                                                                             |
+| `comp2_rate_percent_diff`    |           | (Same as comp1_rate_percent_diff, for competitor 2)                                                                                                                               |
+| ...                          |           | (Fields repeat for competitors 3 through 8)                                                                                                                                     |
+| `comp8_rate`                 |           | (Same as comp1_rate, for competitor 8)                                                                                                                                            |
+| `comp8_inv`                  |           | (Same as comp1_inv, for competitor 8)                                                                                                                                             |
+| `comp8_rate_percent_diff`    |           | (Same as comp1_rate_percent_diff, for competitor 8)                                                                                                                               |
+| **Training set only:** |           |                                                                                                                                                                                   |
+| `position`                   | Integer   | Hotel position on Expedia's search results page (not in test data).                                                                                                                |
+| `click_bool`                 | Boolean   | 1 if the user clicked on the property; 0 if not.                                                                                                                                  |
+| `booking_bool`               | Boolean   | 1 if the user booked the property; 0 if not.                                                                                                                                      |
+| `gross_booking_usd`          | Float     | Total value of the transaction. May differ from `price_usd` due to taxes, fees, booking conventions for multiple days, or purchase of a different room type than shown in search. |

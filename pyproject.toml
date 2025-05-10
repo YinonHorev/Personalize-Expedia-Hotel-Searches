@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "personalize-expedia-hotel-searches"
+name = "dmt"
 version = "0.1.0"
-description = "Add your description here"
+description = "Personalize Expedia Hotel Searches"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,13 +16,20 @@ dependencies = [
     "jupyterlab>=4.4.2",
     "ydata-profiling>=4.16.1",
     "ipywidgets>=8.1.7",
+    "plotly>=6.0.1",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 # Enable auto-fixes
 fix = true
 # Use same line length as Black
-line-length = 88
+line-length = 100
 # Assume Python 3.13
 target-version = "py313"
 # Files to exclude

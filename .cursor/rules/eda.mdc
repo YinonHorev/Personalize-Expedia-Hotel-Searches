@@ -1,0 +1,35 @@
+---
+description: 
+globs: **/eda.py,eda.py
+alwaysApply: false
+---
+# Goal
+We are working on explenatory data anlysis
+
+# Output
+The purpose of this analysis is to better undetstand the data and report our finding in a paper.
+
+# Method
+- Use plotly and pandas 
+- When making pandas aggregationgs try to use as few code lines as possibale. 
+- always prefer to use high level function like `group by`.
+- Seprate the code as stand alone functions that can output the needed information.I am planning to run them using jupyter notebooks.
+- include in the docstring an explanation that I can include as a figure caption if I include it in my report.
+
+# Notes
+`click_bool` and `booking_bool` has a correlation of 78.3%
+- `visitor_location_country_id` has a correlation of 1.0 with `srch_id` which is not surprising because visitors from different country are being referred to different websites  
+- `price_usd` has 95th percentile at 356$. But the 10 highest records are between 3905813 - 19726328 which is quite weird. Maybe it is due to high stay period searched. 
+- `visitor_hist_starrating` (missing 4706481) alongside `visitor_hist_adr_usd` (missing 4705359) missing 95% of the times. Which indicates that the data rarely recognizes the user from past bookings.
+- `prop_review_score` has 0.1 missing values and 4.7 zeroes. It seems that in this case it will make sense to fill missing values with 0.
+- `prop_brand_bool` Seems most hotels are branded from the dataset
+- `prop_location_score2` has a lot of missing values 22% while `prop_location_score1` has no missing values
+- `comp<1-8>_*` has a lot of missing data 
+- `position` is capped at 40.
+
+# What I want to explore
+- [] Generate a bar plot of missing values, since there is a lot of columns avoid plotting values with 0 missing values.
+- [] Generate a bar plot of zeroes values, since there is a lot of columns plot zeroes when their description has significance.
+- [] Plot the relation between click_bool and booking_bool
+- [] plot a scatter plot of srch_length_of_stay compared to price_usd where booking_bool is true.
+- [] Compare booking rate between random_bool plot your findings.
