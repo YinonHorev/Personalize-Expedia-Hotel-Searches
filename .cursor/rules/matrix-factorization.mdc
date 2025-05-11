@@ -1,0 +1,66 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+We want to predicting hotel bookings using Matrix Factorization (MF), a good choice for an effective yet simple-to-implement model is Singular Value Decomposition (SVD), which is a popular MF algorithm. You can use the Surprise Python library, as it is specifically designed for building and analyzing recommender systems and offers a straightforward implementation of SVD and other MF techniques.
+
+Here's a breakdown of the recommended model and implementation steps:
+
+Recommended Model and Library
+
+Model: Singular Value Decomposition (SVD)
+Library: Surprise (Python library)
+
+Here's a general outline of how you can implement an MF model using Surprise for your hotel recommendation task:
+
+Data Preparation:
+
+Load Your Data: Your dataset (data/raw/training_set_VU_DM.csv) contains user search queries and hotel interactions (clicks, bookings). You'll need to represent this as user-item interactions. In this context, a "user" could be the srch_id (search ID) representing a unique search session, and an "item" would be the prop_id (hotel ID).
+Define a "Rating": Since the goal is to predict booking likelihood, you'll need to define what constitutes a "rating". The assignment mentions relevance grades: 5 for a purchase, 1 for a click, and 0 for no interaction. You can use these values directly.
+Use Reader and Dataset: The Surprise library uses a Reader object to parse your data file, specifying the rating scale (e.g., 0 to 5). Then, you'll load this data into a Dataset object.
+Train-Test Split:
+
+Before training, split your data into a training set and a test set. This is crucial for evaluating how well your model generalizes to unseen data. Surprise offers utilities for this, like train_test_split.
+Model Selection and Training:
+
+Choose SVD: Instantiate the SVD algorithm from Surprise.
+Python
+from surprise import SVD
+from surprise import Dataset
+from surprise import Reader
+from surprise.model_selection import train_test_split
+
+# Example:
+# reader = Reader(rating_scale=(0, 5)) # Assuming your rating scale
+# data = Dataset.load_from_df(your_dataframe[['srch_id', 'prop_id', 'your_rating_column']], reader)
+# trainset, testset = train_test_split(data, test_size=0.2)
+
+# model = SVD()
+Train the Model: Fit the SVD model to your training set.
+Python
+# model.fit(trainset)
+Hyperparameters: SVD has several hyperparameters you can tune, such as n_factors (number of latent factors), n_epochs (number of iterations), lr_all (learning rate), and reg_all (regularization term). Experimenting with these can improve performance.
+Making Predictions:
+
+Once trained, use the model to make predictions on your test set.
+Python
+# predictions = model.test(testset)
+For the Kaggle submission, you will need to predict the ranking of hotels for each SearchId in the provided data/raw/test_set_VU_DM.csv file. This involves predicting a score for all relevant hotel properties for a given search and then ordering them.
+Evaluation:
+
+Standard Metrics: Surprise provides an accuracy module with common metrics like Root Mean Squared Error (RMSE) and Mean Absolute Error (MAE).
+Python
+# from surprise import accuracy
+# accuracy.rmse(predictions)
+# accuracy.mae(predictions)
+Competition Metric (NDCG@5): Your assignment specifies Normalized Discounted Cumulative Gain at 5 (NDCG@5) as the evaluation metric. While Surprise doesn't have a built-in function for NDCG, you'll likely need to implement this separately or use another library (like scikit-learn, though it might require some adaptation for ranking tasks) to calculate it based on the ranked lists of hotels your model produces for each search query.
+Hyperparameter Tuning (Optional but Recommended):
+
+To optimize your model, perform hyperparameter tuning. Surprise provides tools like GridSearchCV for this, which systematically works through multiple hyperparameter combinations using cross-validation to find the best performing set.
+Generating Recommendations for Submission:
+
+For each SearchId in the test set, predict a relevance score for all candidate PropertyIds.
+Sort these properties based on the predicted scores in descending order (most likely to be booked first).
+Format your output as specified in the assignment (e.g., SearchId,PropertyId pairs).
+This approach using SVD with the Surprise library should provide a solid foundation for your assignment, balancing effectiveness with relative ease of implementation. Remember to consult the Surprise documentation for detailed usage and examples.

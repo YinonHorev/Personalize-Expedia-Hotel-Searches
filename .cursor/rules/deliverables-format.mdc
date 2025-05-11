@@ -1,0 +1,35 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Format
+we will need to submit a single file, which ranks the properties belonging to a user search on the likeliness that the property will be booked. Here, you should start with listing the property most likely to be booked. An example of part of such a file is shown below.
+
+srch_id , prop_id
+2, 7771
+2, 26540 
+2, 25579 
+2, 7374
+2, 131173
+2, 37331
+2, 27090
+2, 12938
+2, 78858
+2, 30434
+2, 91899
+2, 3105
+2, 6399
+3, 130729
+3, 103937
+3, 556881
+
+# Evaluation
+The evaluation metric for this competition is Normalized Discounted Cumulative Gain (NDCG)@5 calculated per query and averaged over all queries with the values weighted by the log_2 function.
+Hotels for each user query are assigned relevance grades as follows:
+
+5 - The user purchased a room at this hotel
+1 - The user clicked through to see more information on this hotel
+0 - The user neither clicked on this hotel nor purchased a room at this hotel
+
+Submissions to kaggle for each user query should recommend hotels in order from the highest grade (most likely to purchase a hotel room) to the lowest grade (least likely to purchase a hotel room or click on the hotel). 

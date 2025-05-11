@@ -1,0 +1,40 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+├── data/
+│   ├── raw/                # Original, immutable data from Kaggle
+│   │   ├── test_set_VU_DM.csv
+│   │   ├── test_set_VU_DM.csv
+│   │   └── sample_submission.csv
+│   ├── processed/          # Cleaned, transformed, or augmented data
+│   │   └── train_processed.feather
+│   │   └── test_processed.feather
+│   ├── interim/            # Intermediate data files during processing
+│   └── external/           # External data sources, if any
+├── src/dmt                    # Source code for your project
+│   ├── __init__.py
+│   ├── data_processing/    # Scripts for downloading, cleaning, and transforming data
+│   │   └── make_dataset.py
+│   ├── features/           # Scripts for feature engineering
+│   │   └── build_features.py
+│   ├── models/             # Scripts for training models and making predictions
+│   │   ├── train_model.py
+│   │   └── predict_model.py
+│   ├── visualization/      # Scripts for generating visualizations
+│   │   └── visualize.py
+│   └── utils/              # Utility functions used across the project
+│       └── helpers.py
+├── models/                 # Saved trained models
+│   ├── model_v1.pkl
+│   └── model_v2_lightgbm.txt
+├── submissions/            # Generated submission files
+│   ├── submission_20250510_0.785.csv
+│   └── submission_20250511_0.792.csv
+├── reports/                # Generated analysis, reports, or figures (optional)
+│   └── figures/
+│       └── feature_importance.png
+
+├── config/                 # Configuration files (e.g., model parameters, paths)
+│   └── params.yaml
