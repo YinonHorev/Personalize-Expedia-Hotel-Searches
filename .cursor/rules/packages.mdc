@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Overall always prefer using polars for data handling.
+The repo uses ruff as a linter and formatter.
+The repo is managed by uv. To run code or tools use uv. i.e. uv run main.py.
+Or uv add scipy. 
