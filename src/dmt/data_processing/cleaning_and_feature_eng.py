@@ -1,8 +1,8 @@
-import polars as pl
 import logging
 import os
 from pathlib import Path
-import pandas as pd
+
+import polars as pl
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,7 @@ def read_raw_data(train_path, test_path):
     return train_df, test_df
 
 def feature_engineering(train_df, test_df, fill_means = True, fill_medians = False, add_mean = True, add_median = True, add_std = True, save_path = None):
-    """
-    Perform imputing & feature engineering on Expedia dataset: 
+    """Perform imputing & feature engineering on Expedia dataset:
     
       IMPUTATION
     - Optionally fill missing values with per-property means
