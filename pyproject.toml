@@ -20,6 +20,8 @@ dependencies = [
     "tqdm>=4.67.1",
     "pyarrow>=20.0.0",
     "scikit-learn>=1.6.1",
+    "polars>=1.29.0",
+    "lightgbm[scikit-learn]>=4.6.0",
 ]
 
 [tool.setuptools]

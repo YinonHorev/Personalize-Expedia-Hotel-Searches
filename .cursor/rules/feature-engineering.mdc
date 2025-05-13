@@ -1,0 +1,79 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+We want to do the following feature engineering.
+
+Aggregated Features per Property ID (prop_id):
+Average of numeric features per prop_id
+Standard deviation (stddev) of numeric features per prop_id
+Median of numeric features per prop_id
+
+The aggregations can be caluculated on both test and train data and then written to each individually.
+
+We want to use the following dtypes for each column:
+dtypes_train = {
+    # IDs and integers
+    "srch_id": "int64",
+    "site_id": "int8", # max 34
+    "visitor_location_country_id": "int32",
+    "prop_country_id": "int32",
+    "prop_id": "int64",
+    "prop_starrating": "int8",  # 0-5 star rating
+    "position": "int32",
+    "srch_destination_id": "int32",
+    "srch_length_of_stay": "int16",
+    "srch_booking_window": "int32",
+    "srch_adults_count": "int8",
+    "srch_children_count": "int8",
+    "srch_room_count": "int8",
+    
+    # Floats
+    "visitor_hist_starrating": "float32",  # Can be null
+    "visitor_hist_adr_usd": "float32",  # Can be null
+    "prop_review_score": "float32",  # Can be null
+    "prop_location_score1": "float32",
+    "prop_location_score2": "float32",
+    "prop_log_historical_price": "float32",
+    "price_usd": "float32",
+    "srch_query_affinity_score": "float32",  # Can be null
+    "orig_destination_distance": "float32",  # Can be null
+    "gross_bookings_usd": "float32",  # Can be null
+    
+    # Boolean fields stored as int8
+    "prop_brand_bool": "int8",  # +1 or 0
+    "promotion_flag": "int8",  # +1 or 0
+    "srch_saturday_night_bool": "int8",  # +1 or 0
+    "random_bool": "int8",  # +1 or 0
+    "click_bool": "int8",  # 1 or 0
+    "booking_bool": "int8",  # 1 or 0
+    
+    # Competitor data (can be null)
+    "comp1_rate": "int8",  # +1, 0, -1, or null
+    "comp1_inv": "int8",  # +1, 0, or null
+    "comp1_rate_percent_diff": "float32",  # Can be null
+    "comp2_rate": "int8",
+    "comp2_inv": "int8",
+    "comp2_rate_percent_diff": "float32",
+    "comp3_rate": "int8",
+    "comp3_inv": "int8",
+    "comp3_rate_percent_diff": "float32",
+    "comp4_rate": "int8",
+    "comp4_inv": "int8",
+    "comp4_rate_percent_diff": "float32",
+    "comp5_rate": "int8",
+    "comp5_inv": "int8",
+    "comp5_rate_percent_diff": "float32",
+    "comp6_rate": "int8",
+    "comp6_inv": "int8",
+    "comp6_rate_percent_diff": "float32",
+    "comp7_rate": "int8",
+    "comp7_inv": "int8",
+    "comp7_rate_percent_diff": "float32",
+    "comp8_rate": "int8",
+    "comp8_inv": "int8",
+    "comp8_rate_percent_diff": "float32"
+}
+
+date_columns = ["date_time"]
