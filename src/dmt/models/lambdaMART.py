@@ -51,7 +51,7 @@ def baseline_ndcg(df, sort_by, ascending=True, k=5):
     scores = []
     for search_id in df["srch_id"].unique():
         grp = df.filter(pl.col("srch_id") == search_id)
-        y_true = grp["booking_bool"].to_numpy()
+        y_true = grp["rating"].to_numpy()
 
         if sum(y_true) == 0:
             continue
@@ -73,7 +73,7 @@ def evaluate_ndcg(model, df, features, k=5):
     scores = []
     for search_id in df["srch_id"].unique():
         grp = df.filter(pl.col("srch_id") == search_id)
-        y_true = grp["booking_bool"].to_numpy()
+        y_true = grp["rating"].to_numpy()
         y_score = grp["pred"].to_numpy()
 
         # skip searches with no positive labels
@@ -102,7 +102,7 @@ def evaluate_with_helpers(model, df, features, k=5):
 
     # Prepare the dataframes expected by evaluate_model_ndcg
     predictions_df = df_pd[["srch_id", "prop_id", "pred"]].sort_values(["srch_id", "pred"], ascending=[True, False])
-    ground_truth_df = df_pd[["srch_id", "prop_id", "booking_bool"]].rename(columns={"booking_bool": "rating"})
+    ground_truth_df = df_pd[["srch_id", "prop_id", "rating"]].rename(columns={"rating": "rating"})
 
     # Calculate NDCG using helpers
     ndcg = evaluate_model_ndcg(predictions_df, ground_truth_df, k=k)
@@ -133,9 +133,9 @@ def main():
     val = pl.from_pandas(df_pd.iloc[val_idx].reset_index(drop=True))
 
     # 4) Feature / target definition
-    target = "booking_bool"
+    target = "rating"
     group_id = "srch_id"
-    drop_cols = [group_id, "prop_id", "click_bool", "position", "gross_bookings_usd", target]
+    drop_cols = [group_id, "prop_id", "click_bool", "booking_bool", "position", "gross_bookings_usd", target]
     features = [c for c in trn.columns if c not in drop_cols]
 
     # Convert to pandas for LGBMRanker
@@ -183,7 +183,6 @@ def main():
     # 7) Baselines
     price_ndcg = baseline_ndcg(val, sort_by="price_usd", ascending=True, k=5)
     rating_ndcg = baseline_ndcg(val, sort_by="prop_starrating", ascending=False, k=5)
-    
 
     logger.info(f"Baseline NDCG@5 (lowest price): {price_ndcg:.4f}")
     logger.info(f"Baseline NDCG@5 (highest rating): {rating_ndcg:.4f}")

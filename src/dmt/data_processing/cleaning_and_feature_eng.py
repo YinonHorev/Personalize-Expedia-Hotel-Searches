@@ -127,6 +127,25 @@ def feature_engineering(
     train_df = apply_dtypes(train_df, is_train=True)
     test_df = apply_dtypes(test_df, is_train=False)
 
+    # Create 'rating' column in training data based on click_bool and booking_bool
+    # and then drop click_bool and booking_bool from train_df.
+    # These columns ('click_bool', 'booking_bool') only exist in the training set.
+    if "click_bool" in train_df.columns and "booking_bool" in train_df.columns:
+        logger.info("Creating 'rating' column in training data and dropping 'click_bool', 'booking_bool'.")
+        train_df = train_df.with_columns(
+            pl.when(pl.col("booking_bool") == 1)
+            .then(pl.lit(5).cast(pl.Int8))
+            .when(pl.col("click_bool") == 1)
+            .then(pl.lit(1).cast(pl.Int8))
+            .otherwise(pl.lit(0).cast(pl.Int8))
+            .alias("rating")
+        )
+        train_df = train_df.drop(["click_bool", "booking_bool"])
+    else:
+        logger.warning(
+            "'click_bool' or 'booking_bool' not found in training data. 'rating' column not created/updated based on them."
+        )
+
     # Get all prop columns
     prop_columns = [col for col in train_df.columns if col.startswith("prop")]
     logger.info(f"Property columns for aggregation: {prop_columns}")
