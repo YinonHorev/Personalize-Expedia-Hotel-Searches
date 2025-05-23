@@ -1,0 +1,175 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Objective: To find the optimal set of hyperparameters for an LGBMRanker model to maximize the NDCG@5 score on a validation set, using GroupKFold cross-validation.
+
+Tool: Optuna (a hyperparameter optimization framework)
+
+Model: lightgbm.LGBMRanker
+
+Metric: NDCG@5 (Normalized Discounted Cumulative Gain at 5)
+
+Cross-Validation Strategy: sklearn.model_selection.GroupKFold (grouping by srch_id)
+
+Workflow for the AI Agent:
+
+Setup:
+
+Ensure lightgbm and optuna libraries are installed.
+Load your preprocessed training data (train_df_processed.feather or similar) which includes all engineered features and the rating target column.
+Identify feature columns, target column (rating), and group ID column (srch_id).
+Define the Objective Function for Optuna:
+This function will take an optuna.trial object as input, define the hyperparameter search space within the trial, train the LGBMRanker model using these hyperparameters with GroupKFold cross-validation, and return the average NDCG@5 score over the validation folds.
+
+Python
+import lightgbm as lgb
+import optuna
+import polars as pl
+import numpy as np
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import ndcg_score # Or your custom NDCG function
+
+# Assume train_df, features_list, target_col, group_col are pre-defined
+# train_df = pl.read_ipc("path/to/train_processed.feather")
+# features_list = [...] # List of feature column names
+# target_col = "rating"
+# group_col = "srch_id"
+
+def objective(trial):
+    # --- Hyperparameter Search Space ---
+    params = {
+        "objective": "lambdarank",
+        "metric": "ndcg", # LightGBM will use this for early stopping if eval_metric is not set
+        "boosting_type": "gbdt",
+        "n_estimators": trial.suggest_int("n_estimators", 200, 2000, step=100), # Increased upper limit from your 5000 for wider search initially
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
+        "num_leaves": trial.suggest_int("num_leaves", 20, 200), # Wider range
+        "max_depth": trial.suggest_int("max_depth", 5, 15),     # Wider range
+        "min_child_samples": trial.suggest_int("min_child_samples", 20, 200), # Renamed from min_data_in_leaf
+        "subsample": trial.suggest_float("subsample", 0.6, 1.0, step=0.1), # For bagging
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0, step=0.1), # Feature subsampling
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True), # L1 regularization
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True), # L2 regularization
+        "random_state": 42,
+        "n_jobs": -1, # Use all available cores
+        "verbose": -1,
+        # "label_gain": [0, 1, 5] # If your rating scale is 0, 1, 5 - aligns NDCG with it
+    }
+
+    # --- Cross-Validation ---
+    gkf = GroupKFold(n_splits=5) # Or your preferred number of splits
+    ndcg_scores = []
+
+    # Convert to pandas for scikit-learn compatibility if needed by GroupKFold/LGBM, or ensure Polars compatibility
+    # For this example, assuming train_df is Polars and we convert slices to Pandas for LGBM
+    train_pdf = train_df.to_pandas() # Convert once if memory allows, or do it per fold
+
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(train_pdf, train_pdf[target_col], groups=train_pdf[group_col])):
+        X_trn, y_trn = train_pdf.loc[train_idx, features_list], train_pdf.loc[train_idx, target_col]
+        X_val, y_val = train_pdf.loc[val_idx, features_list], train_pdf.loc[val_idx, target_col]
+
+        # Calculate group sizes for LGBMRanker
+        # Ensure srch_id is sorted for correct group calculation if not already
+        # This assumes data is sorted by srch_id within train_idx and val_idx, or use unique() then value_counts()
+        # A more robust way:
+        # temp_trn_df = train_pdf.iloc[train_idx]
+        # grp_trn = temp_trn_df.groupby(group_col).size().to_numpy()
+        # temp_val_df = train_pdf.iloc[val_idx]
+        # grp_val = temp_val_df.groupby(group_col).size().to_numpy()
+
+        # Simpler approach if data per group is contiguous after split (often true with GroupKFold)
+        grp_trn = X_trn.groupby(train_pdf.loc[train_idx, group_col]).size().to_numpy()
+        grp_val = X_val.groupby(train_pdf.loc[val_idx, group_col]).size().to_numpy()
+
+
+        model = lgb.LGBMRanker(**params)
+        model.fit(
+            X_trn, y_trn, group=grp_trn,
+            eval_set=[(X_val, y_val)],
+            eval_group=[grp_val],
+            eval_at=[5], # for NDCG@5
+            callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=-1)] # Lowered stopping rounds for faster trials
+        )
+
+        preds_val = model.predict(X_val)
+
+        # Calculate NDCG@5 for the current fold
+        # Needs y_true and y_pred per group for accurate NDCG calculation
+        # sklearn's ndcg_score expects 2D arrays for y_true and y_pred
+        current_fold_ndcg_scores = []
+        val_groups = train_pdf.loc[val_idx, group_col].unique()
+        for search_id_val in val_groups:
+            # Create mask for current search_id in validation set
+            current_search_mask_val = (train_pdf.loc[val_idx, group_col] == search_id_val)
+
+            # Get true labels and predictions for the current search_id
+            y_true_group = y_val[current_search_mask_val].to_numpy()
+            y_pred_group = preds_val[current_search_mask_val] # preds_val is already numpy
+
+            if np.sum(y_true_group) == 0: # Skip if no relevant items
+                continue
+            # Reshape for ndcg_score: (n_samples, n_labels) -> (1, n_labels_in_group)
+            current_fold_ndcg_scores.append(ndcg_score([y_true_group], [y_pred_group], k=5))
+
+        if current_fold_ndcg_scores: # If there were any valid groups
+             ndcg_scores.append(np.mean(current_fold_ndcg_scores))
+        else: # Handle case where a fold might have no valid groups (unlikely with large data)
+            ndcg_scores.append(0.0)
+
+
+    avg_ndcg = np.mean(ndcg_scores)
+    return avg_ndcg # Optuna maximizes this value
+ Run the Optuna Study:
+
+Python
+# Make sure train_df, features_list, target_col, group_col are loaded and defined before this
+# Example:
+# train_df = pl.read_ipc("data/processed/train_processed.feather")
+# target_col = "rating"
+# group_col = "srch_id"
+# # Define features_list:
+# # Exclude IDs, target, and any other non-feature columns from train_df.columns
+# excluded_cols = [target_col, group_col, "prop_id", "click_bool", "booking_bool", "position", "gross_bookings_usd", "date_time"] # Add others if any
+# features_list = [col for col in train_df.columns if col not in excluded_cols]
+
+
+study_name = "lgbmranker-tuning-v1" # Unique name for the study
+storage_name = f"sqlite:///{study_name}.db" # To save and resume study
+
+study = optuna.create_study(
+    study_name=study_name,
+    storage=storage_name, # For persistence
+    load_if_exists=True,  # Resume if study already exists
+    direction="maximize"  # We want to maximize NDCG
+)
+
+study.optimize(objective, n_trials=100) # Set number of trials (e.g., 50-200)
+
+# --- Output Best Results ---
+print("Number of finished trials: ", len(study.trials))
+print("Best trial:")
+best_trial = study.best_trial
+print("  Value (NDCG@5): ", best_trial.value)
+print("  Params: ")
+for key, value in best_trial.params.items():
+    print(f"    {key}: {value}")
+
+# You can also get a DataFrame of all trials:
+# trials_df = study.trials_dataframe()
+# print(trials_df.sort_values(by="value", ascending=False))
+ Analysis and Using Best Parameters:
+
+Optuna will output the best hyperparameters found.
+Use these best parameters to train your final LGBMRanker model on the entire training dataset.
+Use this final model to make predictions on the test set.
+Key Considerations for the AI Agent:
+
+Computational Resources: Hyperparameter tuning can be time-consuming. Adjust n_trials, n_estimators range, and early_stopping rounds based on available time.
+Search Space: The provided params in the objective function define the search space. These ranges are a good starting point but can be adjusted based on initial results or domain knowledge.
+label_gain for LGBMRanker: If your rating has specific values like 0 (no click), 1 (click), 5 (booking), you can provide label_gain: [0, 1, 5] (matching the order of unique sorted rating values) to LGBMRanker. This helps align the NDCG calculation within LightGBM with the importance of different relevance levels. Make sure the length of label_gain matches the number of unique discrete values in your y_trn and y_val.
+Reproducibility: Set random_state in LGBMRanker for reproducible training runs with the same parameters. Optuna itself also has mechanisms for seeding if needed.
+Memory: Converting the entire Polars DataFrame to pandas (train_df.to_pandas()) might be memory-intensive for very large datasets. If so, perform the conversion and slicing to pandas for X_trn, y_trn, X_val, y_val inside the loop for each fold.
+NDCG Calculation in objective: The example code for calculating NDCG iterates through each group in the validation fold. This is the most accurate way. Ensure your actual implementation of ndcg_score or your custom function correctly handles group-wise evaluation.
+This detailed plan should allow the AI agent (or you) to effectively perform hyperparameter tuning.

@@ -1,0 +1,156 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Feature Engineering Plan
+This document outlines the feature engineering steps for the Kaggle competition. The goal is to create a comprehensive set of features that can improve the performance of our ranking model.
+
+I. Initial Data Preparation & Target Variable Creation:
+
+Read Raw Data:
+Load training_set_VU_DM.csv and test_set_VU_DM.csv using Polars.
+Apply Correct Data Types (apply_dtypes function):
+Cast columns to their appropriate integer, float, boolean (stored as int8), and datetime types as defined in the provided apply_dtypes function. This ensures memory efficiency and correct operations.
+Create Target rating Column (Training Data Only):
+In the training DataFrame, create a rating column based on click_bool and booking_bool:
+If booking_bool == 1, then rating = 5.
+Else if click_bool == 1, then rating = 1.
+Otherwise, rating = 0.
+Cast the rating column to pl.Int8.
+Drop the original click_bool and booking_bool columns from the training DataFrame as their information is now captured in rating.
+II. Imputation of Missing Values:
+
+Identify Columns for Imputation: Focus on numeric features where missing values are present (e.g., visitor_hist_starrating, visitor_hist_adr_usd, prop_review_score, srch_query_affinity_score, orig_destination_distance, and competitor data).
+Strategy 1: Per-Property ID Imputation (Mean/Median):
+For each column in agg_columns (numeric property features like prop_starrating, prop_review_score, prop_location_score1, prop_location_score2, prop_log_historical_price, price_usd if considered a property characteristic, etc.):
+Calculate the mean (or median) of the feature grouped by prop_id using the combined train and test data (to get a more robust statistic for properties present in both, but be cautious if a feature's distribution is vastly different between train/test for reasons other than the split itself).
+Fill missing values in the original column using these prop_id-specific means (or medians).
+Fallback: If a prop_id is new or has all nulls for that feature, fill remaining NaNs with the global mean (or median) of that feature (calculated from the training set or combined set).
+Current implementation uses mean fill (mean_fill function). Median fill (median_fill) is also available as an option.
+Strategy 2: Specific Imputation for prop_review_score:
+As per data_cleaning (if reactivated): Fill nulls in prop_review_score with 0, based on the observation that a significant portion of existing values might already be 0. Evaluate if this is still the best strategy.
+Competitor Data Imputation:
+For compX_rate, compX_inv, compX_rate_percent_diff: Missing values can indicate "no competitor data available" or "no inventory."
+Consider imputing compX_rate with a neutral value (e.g., 0) or a value indicating no data (-2 or similar, if treated as categorical).
+Consider imputing compX_inv with a value indicating no data or no inventory (e.g., -1 or 0).
+compX_rate_percent_diff: Impute with 0 (no difference) or a large value if it signifies a very different price (if rate is missing). Alternatively, mean/median imputation if it makes sense.
+III. Aggregated Features per prop_id:
+
+Identify Numeric Features for Aggregation: This should include all numeric columns that describe a property's intrinsic characteristics.
+From your prop_columns: prop_starrating, prop_review_score, prop_location_score1, prop_location_score2, prop_log_historical_price.
+Also consider price_usd (average price of the property), orig_destination_distance (if relevant as a property feature, e.g., average distance from common origin points if the data context supports this, otherwise it's search-specific).
+Important Note: As per the 1st place team, do not use target-derived variables like rating (or original click_bool, booking_bool) directly in the calculation of these base aggregated features. The features being aggregated should be inherent characteristics of the property.
+Calculations:
+Calculate these aggregations on the combined train and test data to ensure consistency and availability of these features for all prop_ids present in either set.
+For each numeric feature identified above, create:
+{feature_name}_mean_by_prop_id: Average of the feature per prop_id.
+{feature_name}_std_by_prop_id: Standard deviation of the feature per prop_id.
+{feature_name}_median_by_prop_id: Median of the feature per prop_id.
+Join: Join these newly created aggregated features back to both the training and testing DataFrames based on prop_id.
+IV. Likelihood Features (Target Encoding):
+
+Purpose: Capture the probability of a positive outcome (click/booking) for different categorical levels.
+Target Variables for Encoding: click_bool, booking_bool (or the derived rating > 0). Calculate these separately.
+Categorical Features for Encoding:
+prop_id
+srch_destination_id
+site_id
+visitor_location_country_id
+prop_country_id
+Combinations like (prop_id, srch_destination_id)
+Implementation (Crucial: Prevent Leakage):
+Use out-of-fold estimation for the training data:
+Split the training data into K folds (e.g., using GroupKFold on srch_id).
+For each fold k:
+Use the other K-1 folds to calculate the mean of the target variable(s) grouped by the categorical feature.
+Apply these calculated likelihoods as new features to fold k.
+Smoothing/Shrinkage: To prevent overfitting on rare categories, apply smoothing: likelihood = (count_in_category * mean_in_category + global_mean_of_target * alpha) / (count_in_category + alpha)
+count_in_category: Number of times the category appears in the K-1 folds.
+mean_in_category: Mean of the target in that category in the K-1 folds.
+global_mean_of_target: Global mean of the target across the K-1 folds.
+alpha: Smoothing factor (e.g., 10-100, tuneable).
+Applying to Test Data:
+Calculate likelihoods using the entire training dataset (with smoothing).
+Apply these likelihoods to the test set. For categories in test not present in train, use only the global_mean_of_target.
+New Feature Names: e.g., prop_id_click_likelihood, srch_destination_id_booking_likelihood.
+V. Date and Time Features:
+Existing: hour, dow (day of week) derived from date_time.
+Expansion:
+month: Month of date_time.
+dayofyear: Day of the year from date_time.
+weekofyear: Week of the year from date_time.
+is_weekend: Boolean (1/0) if dow is a weekend day.
+Cyclical features for time (if model doesn't handle them well inherently):
+hour_sin = sin(2 * pi * hour / 24)
+hour_cos = cos(2 * pi * hour / 24)
+Similar for dow, month.
+Interaction with Booking Window:
+booking_window_days: srch_booking_window (already present, ensure it's in days or a consistent unit).
+Consider interactions like booking_window_days / (month or season).
+VI. Historical/Contextual User and Property Features:
+
+Average Position of prop_id (from Training Data):
+Calculate the mean position for each prop_id using the training data.
+Name: avg_pos_by_prop_id.
+Apply this feature to both train and test sets (using the values learned from train). For prop_ids in test not seen in train, use a global average position or a special value (e.g., -1 or median position).
+Number of Bookings for Property/Destination Combination (Advanced):
+Group training data by (prop_id, srch_destination_id).
+Count the number of bookings (booking_bool == 1).
+Name: bookings_prop_dest_count.
+Use out-of-fold calculation for train, and full train data for test.
+User Historical Features (If visitor_hist_starrating and visitor_hist_adr_usd are reliable):
+Difference features:
+diff_prop_star_visitor_hist_star = prop_starrating - visitor_hist_starrating
+diff_price_usd_visitor_hist_adr = price_usd - visitor_hist_adr_usd
+Ratio features:
+ratio_prop_star_visitor_hist_star = prop_starrating / (visitor_hist_starrating + epsilon) (add epsilon to avoid division by zero)
+ratio_price_usd_visitor_hist_adr = price_usd / (visitor_hist_adr_usd + epsilon)
+VII. Search Context Features:
+
+Features per srch_id (Calculated within each search query):
+Price-based features within the current search:
+price_rank_in_srch: Rank of price_usd within the srch_id.
+diff_from_avg_price_in_srch = price_usd - mean(price_usd)_for_srch_id
+norm_price_in_srch = (price_usd - min(price_usd)_for_srch_id) / (max(price_usd)_for_srch_id - min(price_usd)_for_srch_id + epsilon)
+Star rating features within the current search:
+starrating_rank_in_srch: Rank of prop_starrating within srch_id.
+diff_from_avg_starrating_in_srch = prop_starrating - mean(prop_starrating)_for_srch_id
+Distance features within the current search (using orig_destination_distance):
+distance_rank_in_srch: Rank of orig_destination_distance within srch_id.
+diff_from_avg_distance_in_srch = orig_destination_distance - mean(orig_destination_distance)_for_srch_id
+Mean distance to other properties in the same search (as suggested by Gert, 13th place):
+For each srch_id, and for each prop_id in that search, calculate the mean of orig_destination_distance of all other properties in that same srch_id.
+Number of properties in search: n_properties_in_srch = count(prop_id)_for_srch_id
+VIII. Competitor Interaction Features:
+
+Iterate through comp1 to comp8:
+is_compX_cheaper = 1 if compX_rate == -1 else 0
+is_compX_more_expensive = 1 if compX_rate == 1 else 0
+is_compX_inv_available = 1 if compX_inv == 1 else 0 (or handle 0 as available if that's the convention)
+Aggregated competitor features:
+num_comps_available = sum(is_compX_inv_available for X in 1..8)
+num_comps_cheaper = sum(is_compX_cheaper for X in 1..8)
+num_comps_more_expensive = sum(is_compX_more_expensive for X in 1..8)
+avg_comp_rate_percent_diff = mean(compX_rate_percent_diff where compX_rate_percent_diff is not null)
+min_comp_rate_percent_diff = min(compX_rate_percent_diff where compX_rate_percent_diff is not null)
+max_comp_rate_percent_diff = max(compX_rate_percent_diff where compX_rate_percent_diff is not null)
+IX. Interaction Features (Examples):
+
+price_per_star = price_usd / (prop_starrating + epsilon)
+price_usd_x_prop_location_score1 = price_usd * prop_location_score1
+prop_review_score_x_prop_starrating = prop_review_score * prop_starrating
+Difference between property's aggregated average price (price_usd_mean_by_prop_id) and current price_usd in search.
+diff_current_price_from_prop_avg = price_usd - price_usd_mean_by_prop_id
+Features related to search query vs. property features:
+srch_adults_count * prop_starrating (interaction)
+X. Data Cleaning (Optional - to be reviewed):
+
+Outlier Removal for price_usd (from data_cleaning function):
+Calculate Q1, Q3, and IQR for price_usd on the training data.
+Filter rows where price_usd is greater than Q3 + 1.5 * IQR.
+Evaluate if this is beneficial or removes valuable high-end property data. Consider if this should be applied only to train or to train and test consistently.
+XI. Final Column Alignment:
+
+Use the align_columns function before saving processed data or feeding to the model to ensure train and test sets have the exact same columns in the same order, with compatible types. Unseen columns in one set should be filled with nulls/appropriate defaults.
+This comprehensive plan should provide a strong foundation for your model. Remember to test the impact of new feature groups incrementally.

@@ -1,0 +1,294 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Objective: Implement and tune an XGBoost Ranker model for the hotel ranking task, then create an ensemble with a pre-trained LGBMRanker model to improve NDCG@5.
+
+Environment: MacBook M3 Pro (CPU-only for XGBoost ranking tasks). Hyperparameter tuning should be mindful of computational resources.
+
+Assumptions:
+
+You have a preprocessed training dataset (train_df_processed.feather or similar) containing all engineered features and the rating target column.
+You have a preprocessed test dataset (test_df_processed.feather or similar).
+You have a list of feature column names (features_list), the target column name (target_col = "rating"), and the group ID column name (group_col = "srch_id").
+You have a trained LGBMRanker model (let's call its saved model file lgbm_ranker_model.txt).
+The necessary libraries (xgboost, optuna, polars, numpy, sklearn) are installed.
+Phase 1: XGBoost Ranker - Standalone Implementation and Tuning
+
+1. Data Preparation for XGBoost Ranker:
+
+Load the processed training data using Polars.
+Convert the Polars DataFrame to a Pandas DataFrame, as XGBoost typically integrates more directly with Pandas/NumPy for its Scikit-Learn API.
+Prepare X_train, y_train, and groups_train:
+X_train: Pandas DataFrame containing only the feature columns from the training set.
+y_train: Pandas Series or NumPy array for the rating target variable.
+groups_train: A NumPy array indicating the size of each group (i.e., number of items per srch_id in the training set). This is crucial for ranking tasks.
+To create groups_train:
+Python
+# Assuming train_pdf is your pandas training DataFrame
+# Ensure it's sorted by group_col if it's not already, for consistent group calculation
+# train_pdf = train_pdf.sort_values(by=group_col) # Optional, but good practice
+groups_train = train_pdf.groupby(group_col).size().to_numpy()
+Similarly, prepare X_test (and groups_test if you have a labeled test set for evaluation, otherwise groups_test is only needed if the test set also has a group structure for prediction).
+2. Define the Optuna Objective Function for XGBoost Ranker:
+
+This function will be similar to the one for LGBMRanker but tailored for XGBoost.
+
+Python
+import xgboost as xgb
+import optuna
+import polars as pl
+import numpy as np
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import ndcg_score # Or your custom NDCG function
+
+# Assume train_df_path, features_list, target_col, group_col are pre-defined
+# train_df_path = "data/processed/train_processed.feather"
+# train_df_full_pd = pl.read_ipc(train_df_path).to_pandas() # Load once
+
+def objective_xgb(trial):
+    # --- Hyperparameter Search Space (Limited for M3 Pro CPU) ---
+    params = {
+        "objective": "rank:ndcg",  # Listwise approach optimizing NDCG
+        "eval_metric": "ndcg@5",   # Evaluation metric
+        "booster": "gbtree",
+        "n_estimators": trial.suggest_int("n_estimators", 100, 700, step=50), # Reduced range
+        "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.15, log=True), # Slightly higher min LR
+        "max_depth": trial.suggest_int("max_depth", 4, 8), # Reduced depth
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "subsample": trial.suggest_float("subsample", 0.7, 1.0, step=0.1),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.7, 1.0, step=0.1),
+        "gamma": trial.suggest_float("gamma", 0, 0.5), # L1 regularization on number of leaves
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-2, 5.0, log=True), # L2 regularization
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-2, 5.0, log=True),   # L1 regularization
+        "random_state": 42,
+        "tree_method": "hist", # Efficient for CPU, 'exact' can be slow
+        # "n_jobs": -1 # XGBoost might not always use n_jobs for ranking as effectively as for classification/regression
+    }
+
+    # --- Cross-Validation ---
+    gkf = GroupKFold(n_splits=3) # Reduced splits for faster tuning
+    ndcg_scores_fold = []
+
+    # Use the pre-loaded full pandas DataFrame
+    # train_pdf_for_cv = train_df_full_pd # If using a global variable
+
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(train_df_full_pd, train_df_full_pd[target_col], groups=train_df_full_pd[group_col])):
+        X_trn_fold, y_trn_fold = train_df_full_pd.loc[train_idx, features_list], train_df_full_pd.loc[train_idx, target_col]
+        X_val_fold, y_val_fold = train_df_full_pd.loc[val_idx, features_list], train_df_full_pd.loc[val_idx, target_col]
+
+        # Calculate group sizes for XGBRanker
+        # Ensure data is sorted by group_col if not done globally
+        grp_trn_fold = X_trn_fold.groupby(train_df_full_pd.loc[train_idx, group_col]).size().to_numpy()
+        grp_val_fold = X_val_fold.groupby(train_df_full_pd.loc[val_idx, group_col]).size().to_numpy()
+
+
+        model_xgb = xgb.XGBRanker(**params)
+        model_xgb.fit(
+            X_trn_fold, y_trn_fold, group=grp_trn_fold,
+            eval_set=[(X_val_fold, y_val_fold)],
+            eval_group=[grp_val_fold], # XGBoost expects eval_group as a list of arrays
+            early_stopping_rounds=30, # Reduced early stopping rounds
+            verbose=False
+        )
+
+        preds_val_fold = model_xgb.predict(X_val_fold)
+
+        current_fold_ndcg_scores_group = []
+        val_groups_unique = train_df_full_pd.loc[val_idx, group_col].unique()
+
+        for search_id_val in val_groups_unique:
+            current_search_mask_val = (train_df_full_pd.loc[val_idx, group_col] == search_id_val)
+            y_true_group = y_val_fold[current_search_mask_val].to_numpy()
+            y_pred_group = preds_val_fold[current_search_mask_val]
+
+            if np.sum(y_true_group) == 0:
+                continue
+            current_fold_ndcg_scores_group.append(ndcg_score([y_true_group], [y_pred_group], k=5))
+        
+        if current_fold_ndcg_scores_group:
+            ndcg_scores_fold.append(np.mean(current_fold_ndcg_scores_group))
+        else:
+            ndcg_scores_fold.append(0.0)
+            
+    avg_ndcg = np.mean(ndcg_scores_fold)
+    return avg_ndcg
+3. Run the Optuna Study for XGBoost:
+
+Reduce n_splits in GroupKFold (e.g., to 3) for faster tuning trials.
+Limit n_trials in study.optimize (e.g., 20-40 trials) to manage computation time.
+The hyperparameter ranges in objective_xgb are already slightly narrowed.
+<!-- end list -->
+
+Python
+# --- Load data and define globals (features_list, target_col, group_col) ---
+train_df_path = "data/processed/train_processed.feather" # Or your actual path
+train_df_polars = pl.read_ipc(train_df_path)
+train_df_full_pd = train_df_polars.to_pandas() # Convert to Pandas
+
+target_col = "rating"
+group_col = "srch_id"
+# Define features_list as before, excluding IDs, target, etc.
+excluded_cols = [target_col, group_col, "prop_id", "click_bool", "booking_bool", "position", "gross_bookings_usd", "date_time"]
+features_list = [col for col in train_df_polars.columns if col not in excluded_cols]
+# --- End Load data and define globals ---
+
+
+study_name_xgb = "xgbranker-tuning-m3-v1"
+storage_name_xgb = f"sqlite:///{study_name_xgb}.db"
+
+study_xgb = optuna.create_study(
+    study_name=study_name_xgb,
+    storage=storage_name_xgb,
+    load_if_exists=True,
+    direction="maximize"
+)
+
+# Reduced number of trials for M3 Pro
+study_xgb.optimize(objective_xgb, n_trials=30) # Adjust n_trials as needed
+
+print("Best XGBoost trial:")
+best_trial_xgb = study_xgb.best_trial
+print("  Value (NDCG@5): ", best_trial_xgb.value)
+print("  Params: ")
+for key, value in best_trial_xgb.params.items():
+    print(f"    {key}: {value}")
+
+# Save the best hyperparameters
+best_xgb_params = best_trial_xgb.params
+4. Train Final XGBoost Model:
+Use the best_xgb_params found by Optuna.
+Train the XGBoost Ranker on the entire training dataset.
+Save the trained XGBoost model.
+<!-- end list -->
+
+Python
+# Prepare full training data
+X_train_full = train_df_full_pd[features_list]
+y_train_full = train_df_full_pd[target_col]
+groups_train_full = train_df_full_pd.groupby(group_col).size().to_numpy()
+
+final_xgb_model = xgb.XGBRanker(**best_xgb_params)
+# Add n_estimators from best_xgb_params again if it was popped or not included in **
+# Or ensure n_estimators used for fitting is the one from optuna, potentially adjusting if early stopping was very effective
+# It's common to set n_estimators to a large value and rely on early stopping during tuning,
+# then for the final model, use the 'best_iteration' if available, or the tuned n_estimators.
+# XGBoost's fit with early stopping stores best_ntree_limit.
+# For simplicity here, we'll use the tuned n_estimators. If early stopping was aggressive,
+# you might need more estimators for the full dataset or use a validation set during this final fit.
+
+final_xgb_model.fit(X_train_full, y_train_full, group=groups_train_full, verbose=True)
+
+# Save the model
+model_xgb_path = "models/xgb_ranker_model.json" # XGBoost often saves in json orubj format
+final_xgb_model.save_model(model_xgb_path)
+print(f"Final XGBoost model saved to {model_xgb_path}")
+Phase 2: Ensembling XGBoost Ranker with Pre-trained LGBMRanker
+
+Strategy: Weighted Blending of Scores
+
+This is the simplest and often effective ensembling method.
+
+1. Load Models:
+
+Load your pre-trained LGBMRanker model (lgbm_ranker_model.txt).
+Load the newly trained XGBoost Ranker model (xgb_ranker_model.json).
+<!-- end list -->
+
+Python
+import lightgbm as lgb
+import xgboost as xgb
+import polars as pl
+
+# Load processed test data
+test_df_path = "data/processed/test_processed.feather" # Or your actual path
+test_df_polars = pl.read_ipc(test_df_path)
+# Ensure test_df_polars has gone through the same date preprocessing as train if 'hour', 'dow' are used
+# test_df_polars = preprocess(test_df_polars) # Assuming preprocess is defined and adds 'hour', 'dow' and drops 'date_time'
+
+test_pdf = test_df_polars.to_pandas()
+X_test_final = test_pdf[features_list] # features_list should be consistent
+
+# Load LGBM model
+lgbm_model_path = "models/lambdamart_model_YOUR_TIMESTAMP.txt" # Replace with your actual LGBM model path
+lgbm_model = lgb.Booster(model_file=lgbm_model_path)
+
+# Load XGBoost model
+xgb_model_path = "models/xgb_ranker_model.json"
+xgb_model = xgb.XGBRanker() # Initialize with default or best params if needed, then load
+xgb_model.load_model(xgb_model_path)
+2. Generate Predictions from Both Models:
+
+Use both models to predict scores on the test set (X_test_final).
+<!-- end list -->
+
+Python
+# Predictions from LGBM
+# LGBM Booster's predict method might need num_iteration if not specified during save/load
+preds_lgbm = lgbm_model.predict(X_test_final)
+# If your lgbm_model is an LGBMRanker scikit-learn object:
+# lgbm_sklearn_model = lgb.LGBMRanker().load_model(lgbm_model_path) # or however you saved/load it
+# preds_lgbm = lgbm_sklearn_model.predict(X_test_final)
+
+
+# Predictions from XGBoost
+preds_xgb = xgb_model.predict(X_test_final)
+3. Blend the Predictions:
+
+Combine the scores using a weighted average. Start with equal weights (0.5 each).
+These weights can be tuned on a validation set if available, but for submission, equal weights or weights slightly favoring the historically better model are common starting points.
+<!-- end list -->
+
+Python
+# Define weights
+weight_lgbm = 0.5
+weight_xgb = 0.5
+
+# Blend scores
+blended_scores = (weight_lgbm * preds_lgbm) + (weight_xgb * preds_xgb)
+
+# Add blended scores to your test DataFrame (Polars or Pandas)
+test_df_polars = test_df_polars.with_columns(pl.lit(blended_scores).alias("blended_predictions"))
+4. Generate Submission File:
+
+Use your existing generate_submission function, but pass the blended_predictions column.
+The ndcg_score parameter in generate_submission would ideally be from evaluating this ensemble on a validation set. If not available, you can omit it or use an estimate.
+<!-- end list -->
+
+Python
+# Assuming generate_submission is defined as in your original script
+# from your_module import generate_submission # or define it here
+
+# Example:
+# def generate_submission(df, pred_col, output_file=None, ndcg_score_val=None):
+#     # ... (your existing submission logic) ...
+#     pass
+
+# final_ndcg_for_filename = 0.41 # Placeholder: ideally from ensemble validation
+final_ndcg_for_filename = study_xgb.best_trial.value # Or an average, or from LGBM if not re-evaluating ensemble
+
+generate_submission(
+    test_df_polars,
+    pred_col="blended_predictions",
+    ndcg_score=final_ndcg_for_filename # Use a relevant NDCG score for filename
+)
+
+print("Ensemble submission file generated.")
+Tips for M3 Pro CPU Constraints:
+
+Reduce n_splits in GroupKFold: Using 3 splits instead of 5 during Optuna trials significantly speeds things up.
+Limit n_trials for Optuna: 20-40 trials might be a good balance. Monitor the study's progress; if scores plateau early, you might not need many more.
+Narrow Hyperparameter Ranges: Based on typical good values or insights from LGBM tuning, you can slightly narrow the search space for XGBoost. The example ranges are already somewhat constrained.
+tree_method='hist' for XGBoost: This is generally faster on CPU.
+Early Stopping: Use aggressive early stopping (e.g., 20-30 rounds) during Optuna trials. For the final model, you can use a slightly larger number of rounds or train for the best_iteration found during tuning if that information is easily accessible.
+Optuna Pruning: Consider adding a pruner to Optuna (e.g., MedianPruner) to stop unpromising trials early, further saving time.
+Python
+# In Optuna study creation:
+# from optuna.pruners import MedianPruner
+# study = optuna.create_study(..., pruner=MedianPruner())
+# Then in the objective function, after each fold or periodically:
+# trial.report(intermediate_value, step)
+# if trial.should_prune():
+#     raise optuna.exceptions.TrialPruned()
+

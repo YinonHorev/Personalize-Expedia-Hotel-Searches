@@ -1,0 +1,230 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Final Model Training and Ensembling
+Objective: Train the final LGBMRanker and XGBRanker models on the entire training dataset using the best-found hyperparameters, then create an ensemble for submission.
+Best Hyperparameters:
+
+LGBMRanker:
+n_estimators: 700
+learning_rate: 0.03568617151380954
+num_leaves: 88
+max_depth: 13
+min_child_samples: 28
+subsample: 0.7
+colsample_bytree: 0.8
+reg_alpha: 9.891854416407897
+reg_lambda: 0.0014933652147104117
+(Standard params to add: objective='lambdarank', metric='ndcg', boosting_type='gbdt', random_state=42, n_jobs=-1, verbose=-1)
+XGBRanker:
+n_estimators: 550
+learning_rate: 0.06412038072139861
+max_depth: 8
+min_child_weight: 3
+subsample: 0.7999999999999999
+colsample_bytree: 0.8999999999999999
+gamma: 0.131873411179656
+reg_lambda: 1.1051835714463383
+reg_alpha: 0.09014861689127424
+(Standard params to add: objective='rank:ndcg', eval_metric='ndcg@5', booster='gbtree', tree_method='hist', random_state=42)
+Assumptions:
+
+Processed training data: train_df_processed.feather
+Processed test data: test_df_processed.feather
+features_list, target_col = "rating", group_col = "srch_id" are defined.
+A generate_submission(df, pred_col, output_file_name, ndcg_score=None) function is available.
+Phase 1: Data Preparation for Final Training
+
+Load Full Training Data:
+Read train_df_processed.feather into a Polars DataFrame.
+Convert to a Pandas DataFrame (train_pdf_full).
+Prepare Training Inputs:
+X_train_full = train_pdf_full[features_list]
+y_train_full = train_pdf_full[target_col]
+groups_train_full = train_pdf_full.groupby(group_col).size().to_numpy() (Ensure train_pdf_full is implicitly or explicitly sorted by group_col if group order matters for specific library versions, though groupby().size() is generally robust).
+Phase 2: Train Final LGBMRanker Model
+
+Initialize LGBMRanker:
+
+Use the best hyperparameters provided above for LGBM.
+Explicitly set n_estimators from the Optuna results.
+<!-- end list -->
+
+Python
+import lightgbm as lgb
+import polars as pl
+import pandas as pd # Assuming data will be in pandas for model fitting
+
+# --- Best LGBM Params (from user) ---
+best_lgbm_params_dict = {
+    'n_estimators': 700,
+    'learning_rate': 0.03568617151380954,
+    'num_leaves': 88,
+    'max_depth': 13,
+    'min_child_samples': 28, # LGBM uses min_child_samples
+    'subsample': 0.7,
+    'colsample_bytree': 0.8,
+    'reg_alpha': 9.891854416407897,
+    'reg_lambda': 0.0014933652147104117,
+    'objective': 'lambdarank',
+    'metric': 'ndcg', # Can specify ndcg@5 if desired, but 'ndcg' is fine
+    'boosting_type': 'gbdt',
+    'random_state': 42,
+    'n_jobs': -1, # Use all available cores
+    'verbose': -1, # Suppress training verbosity unless needed
+    # 'label_gain': [0, 1, 5] # If your rating scale is 0, 1, 5
+}
+
+final_lgbm_model = lgb.LGBMRanker(**best_lgbm_params_dict)
+ Fit LGBMRanker on Full Training Data:
+
+No eval_set or early_stopping_rounds will be used here; we trust the n_estimators found by Optuna.
+<!-- end list -->
+
+Python
+print("Training final LGBMRanker model on the entire training set...")
+final_lgbm_model.fit(
+    X_train_full,
+    y_train_full,
+    group=groups_train_full
+)
+print("LGBMRanker training complete.")
+ Save the Final LGBM Model:
+
+It's good practice to use the underlying Booster object for saving if you plan to load it similarly later, or save the scikit-learn wrapper.
+<!-- end list -->
+
+Python
+lgbm_model_output_path = "models/final_lgbm_ranker_model.txt"
+final_lgbm_model.booster_.save_model(lgbm_model_output_path) # Saves the core booster
+# Alternatively, if using joblib or pickle for the scikit-learn wrapper:
+# import joblib
+# joblib.dump(final_lgbm_model, "models/final_lgbm_ranker_sklearn.joblib")
+print(f"Final LGBM model saved to {lgbm_model_output_path}")
+ Phase 3: Train Final XGBRanker Model
+
+Initialize XGBRanker:
+
+Use the best hyperparameters provided above for XGBoost.
+Explicitly set n_estimators.
+<!-- end list -->
+
+Python
+import xgboost as xgb
+
+# --- Best XGBoost Params (from user) ---
+best_xgb_params_dict = {
+    'n_estimators': 550,
+    'learning_rate': 0.06412038072139861,
+    'max_depth': 8,
+    'min_child_weight': 3,
+    'subsample': 0.7999999999999999,
+    'colsample_bytree': 0.8999999999999999,
+    'gamma': 0.131873411179656,
+    'reg_lambda': 1.1051835714463383,
+    'reg_alpha': 0.09014861689127424,
+    'objective': 'rank:ndcg',
+    'eval_metric': 'ndcg@5', # For potential internal tracking if verbose, not for early stopping here
+    'booster': 'gbtree',
+    'tree_method': 'hist', # Good for CPU performance
+    'random_state': 42,
+    # 'n_jobs': -1 # Can be set, but sometimes doesn't impact ranking as much
+}
+
+final_xgb_model = xgb.XGBRanker(**best_xgb_params_dict)
+ Fit XGBRanker on Full Training Data:
+
+No eval_set or early_stopping_rounds.
+<!-- end list -->
+
+Python
+print("Training final XGBRanker model on the entire training set...")
+final_xgb_model.fit(
+    X_train_full,
+    y_train_full,
+    group=groups_train_full, # XGBoost uses 'group' not 'qid' in scikit-learn wrapper
+    verbose=False # Suppress training verbosity unless needed
+)
+print("XGBRanker training complete.")
+ Save the Final XGBoost Model:
+
+Python
+xgb_model_output_path = "models/final_xgb_ranker_model.json"
+final_xgb_model.save_model(xgb_model_output_path)
+print(f"Final XGBoost model saved to {xgb_model_output_path}")
+ Phase 4: Ensemble Predictions and Submission
+
+Load Processed Test Data:
+
+Read test_df_processed.feather into a Polars DataFrame (test_df_polars).
+Perform any necessary preprocessing consistent with training (e.g., adding hour, dow from date_time if these features are used and generated on-the-fly rather than saved in test_df_processed.feather).
+Convert to Pandas DataFrame (test_pdf) and extract X_test_final = test_pdf[features_list].
+Load Trained Models (if not already in memory):
+
+This step is if you are running prediction in a separate script/session. If final_lgbm_model and final_xgb_model are still in memory, you can skip reloading.
+<!-- end list -->
+
+Python
+# Example if reloading:
+# final_lgbm_model = lgb.Booster(model_file=lgbm_model_output_path) # If saved booster
+# final_xgb_model = xgb.XGBRanker()
+# final_xgb_model.load_model(xgb_model_output_path)
+ Generate Predictions:
+
+Python
+print("Generating predictions from final LGBM model...")
+# If final_lgbm_model is a Booster object:
+preds_lgbm_final = final_lgbm_model.predict(X_test_final, num_iteration=final_lgbm_model.current_iteration())
+# If final_lgbm_model is an LGBMRanker (scikit-learn wrapper) object:
+# preds_lgbm_final = final_lgbm_model.predict(X_test_final)
+
+
+print("Generating predictions from final XGBoost model...")
+preds_xgb_final = final_xgb_model.predict(X_test_final)
+ Blend Predictions:
+
+Use simple averaging or pre-determined weights. For now, equal weights.
+<!-- end list -->
+
+Python
+weight_lgbm = 0.5
+weight_xgb = 0.5
+blended_scores_final = (weight_lgbm * preds_lgbm_final) + (weight_xgb * preds_xgb_final)
+
+# Add to the Polars DataFrame for submission generation
+test_df_polars = test_df_polars.with_columns(pl.lit(blended_scores_final).alias("ensemble_predictions"))
+ Create Submission File:
+
+Use your generate_submission function. The ndcg_score for the filename could be the best validation NDCG you observed for either model during tuning, or an optimistic estimate for the ensemble.
+<!-- end list -->
+
+Python
+# Placeholder for the NDCG score to use in the filename
+# This should ideally be an estimate of your ensemble's performance
+# For example, you could use the XGBoost validation score from Optuna if it was higher
+submission_ndcg_estimate = 0.4037 # From XGBoost Optuna output
+
+output_submission_filename = f"submission_ensemble_lgbm_xgb_{submission_ndcg_estimate:.4f}.csv"
+
+# Ensure your generate_submission function is loaded/defined
+# generate_submission(test_df_polars, "ensemble_predictions", output_submission_filename, ndcg_score=submission_ndcg_estimate)
+
+print(f"Submission file generation process to be called with: {output_submission_filename}")
+# AI Agent: At this point, you would call your actual generate_submission function.
+# Example call:
+# your_submission_module.generate_submission(
+#     df=test_df_polars,
+#     pred_col="ensemble_predictions",
+#     output_file=output_submission_filename, # if your function takes output_file directly
+#     ndcg_score=submission_ndcg_estimate # if your function takes ndcg_score for naming
+# )
+ AI Agent Execution Notes:
+
+Ensure all file paths (train_df_processed.feather, test_df_processed.feather, model output paths, submission output path) are correct.
+Make sure the features_list, target_col, and group_col variables are accurately defined and accessible in the scope where data preparation happens.
+The Polars to Pandas conversion (.to_pandas()) is done once for the full training set to avoid repeated conversions.
+The generate_submission function is assumed to be provided or defined elsewhere by the user. The AI agent should be instructed on how to call it.
+This plan prioritizes using the n_estimators directly from Optuna. If the agent observes that the models are perhaps underfitting or overfitting drastically on the full set (which is unlikely if Optuna did its job well), then a more complex strategy involving an eval_set with early stopping on the final fit could be considered, but that adds complexity.
+This plan provides a clear sequence for the AI agent to follow to train the final models and produce an ensembled submission.
