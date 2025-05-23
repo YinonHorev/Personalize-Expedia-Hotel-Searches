@@ -12,6 +12,10 @@ from dmt.utils.helpers import evaluate_model_ndcg, log_evaluation_summary
 
 logger = logging.getLogger(__name__)
 
+# Add the rating map
+RATING_MAP = {0: 0, 1: 1, 5: 2}
+LABEL_GAIN = [0, 1, 5]
+
 
 def generate_submission(df, pred_col, output_file=None, ndcg_score=None):
     sub = df.select(["srch_id", "prop_id", pred_col]).clone()
@@ -51,7 +55,7 @@ def baseline_ndcg(df, sort_by, ascending=True, k=5):
     scores = []
     for search_id in df["srch_id"].unique():
         grp = df.filter(pl.col("srch_id") == search_id)
-        y_true = grp["booking_bool"].to_numpy()
+        y_true = grp["rating"].to_numpy()
 
         if sum(y_true) == 0:
             continue
@@ -73,7 +77,7 @@ def evaluate_ndcg(model, df, features, k=5):
     scores = []
     for search_id in df["srch_id"].unique():
         grp = df.filter(pl.col("srch_id") == search_id)
-        y_true = grp["booking_bool"].to_numpy()
+        y_true = grp["rating"].to_numpy()
         y_score = grp["pred"].to_numpy()
 
         # skip searches with no positive labels
@@ -102,7 +106,7 @@ def evaluate_with_helpers(model, df, features, k=5):
 
     # Prepare the dataframes expected by evaluate_model_ndcg
     predictions_df = df_pd[["srch_id", "prop_id", "pred"]].sort_values(["srch_id", "pred"], ascending=[True, False])
-    ground_truth_df = df_pd[["srch_id", "prop_id", "booking_bool"]].rename(columns={"booking_bool": "rating"})
+    ground_truth_df = df_pd[["srch_id", "prop_id", "rating"]].rename(columns={"rating": "rating"})
 
     # Calculate NDCG using helpers
     ndcg = evaluate_model_ndcg(predictions_df, ground_truth_df, k=k)
@@ -133,57 +137,71 @@ def main():
     val = pl.from_pandas(df_pd.iloc[val_idx].reset_index(drop=True))
 
     # 4) Feature / target definition
-    target = "booking_bool"
+    target = "rating"
     group_id = "srch_id"
-    drop_cols = [group_id, "prop_id", "click_bool", "position", "gross_bookings_usd", target]
+    drop_cols = [group_id, "prop_id", "click_bool", "booking_bool", "position", "gross_bookings_usd", target]
     features = [c for c in trn.columns if c not in drop_cols]
 
     # Convert to pandas for LGBMRanker
     X_trn = trn.select(features).to_pandas()
-    y_trn = trn.select(target).to_pandas().iloc[:, 0]
+    y_trn_original = trn.select(target).to_pandas().iloc[:, 0]
     grp_trn = trn.group_by(group_id).agg(pl.count()).select(pl.col("count")).to_numpy().flatten()
 
     X_val = val.select(features).to_pandas()
-    y_val = val.select(target).to_pandas().iloc[:, 0]
+    y_val_original = val.select(target).to_pandas().iloc[:, 0]
     grp_val = val.group_by(group_id).agg(pl.count()).select(pl.col("count")).to_numpy().flatten()
 
+    # Map ratings for LightGBM training as done during tuning
+    y_trn_mapped = y_trn_original.map(RATING_MAP).astype(int)
+    y_val_mapped = y_val_original.map(RATING_MAP).astype(int)
+
     # 5) Train on train‐fold
-    logger.info("Training LambdaMART model...")
+    logger.info("Training LambdaMART model with best parameters...")
     model = lgb.LGBMRanker(
         objective="lambdarank",
-        metric="ndcg",
+        metric="ndcg",  # LightGBM's internal NDCG will use label_gain with mapped labels
         boosting_type="gbdt",
-        # device="gpu",
-        n_estimators=5000,
-        learning_rate=0.03,
-        num_leaves=128,
-        max_depth=12,
-        min_data_in_leaf=100,
+        # Best parameters from Optuna trial 5:
+        n_estimators=700,
+        learning_rate=0.03568617151380954,
+        num_leaves=88,
+        max_depth=13,
+        min_child_samples=28,  # Optuna param, LGBM alias for min_data_in_leaf
+        subsample=0.7,
+        colsample_bytree=0.8,
+        reg_alpha=9.891854416407897,
+        reg_lambda=0.0014933652147104117,
+        label_gain=LABEL_GAIN,  # Crucial for consistency with tuning
+        random_state=42,  # Keep for reproducibility
+        n_jobs=-1,  # Use all available cores
         verbose=-1,
     )
 
     model.fit(
         X_trn,
-        y_trn,
+        y_trn_mapped,  # Use mapped labels for training
         group=grp_trn,
-        eval_set=[(X_val, y_val)],
+        eval_set=[(X_val, y_val_mapped)],  # Use mapped labels for LightGBM's eval_set
         eval_group=[grp_val],
         callbacks=[lgb.log_evaluation(period=50), lgb.early_stopping(stopping_rounds=100)],
     )
 
     # 6) Evaluate on val‐fold
+    # IMPORTANT: The evaluation functions evaluate_ndcg and evaluate_with_helpers
+    # should use the ORIGINAL ratings from 'val' DataFrame for y_true.
+    # The existing evaluate_ndcg and evaluate_with_helpers already select "rating" from the Polars DataFrame 'val',
+    # which holds original ratings, so they should be correct.
     logger.info("Evaluating model...")
-    ndcg5 = evaluate_ndcg(model, val, features, k=5)
+    ndcg5 = evaluate_ndcg(model, val, features, k=5)  # val DataFrame has original ratings
     logger.info(f"Validation NDCG@5 (model): {ndcg5:.4f}")
 
     # Also evaluate using the helpers implementation
-    ndcg5_helpers = evaluate_with_helpers(model, val, features, k=5)
+    ndcg5_helpers = evaluate_with_helpers(model, val, features, k=5)  # val DataFrame has original ratings
     logger.info(f"Validation NDCG@5 (helpers): {ndcg5_helpers:.4f}")
 
     # 7) Baselines
     price_ndcg = baseline_ndcg(val, sort_by="price_usd", ascending=True, k=5)
     rating_ndcg = baseline_ndcg(val, sort_by="prop_starrating", ascending=False, k=5)
-    
 
     logger.info(f"Baseline NDCG@5 (lowest price): {price_ndcg:.4f}")
     logger.info(f"Baseline NDCG@5 (highest rating): {rating_ndcg:.4f}")

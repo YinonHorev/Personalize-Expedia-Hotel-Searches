@@ -22,6 +22,8 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "polars>=1.29.0",
     "lightgbm[scikit-learn]>=4.6.0",
+    "optuna>=4.3.0",
+    "xgboost>=3.0.1",
 ]
 
 [tool.setuptools]
